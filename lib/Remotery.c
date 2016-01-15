@@ -5488,6 +5488,36 @@ static GLenum rmtglGetError(void)
     #endif
 #endif
 
+#if defined(RMT_PLATFORM_MACOS) && RMT_USE_OPENGL
+    #include <Carbon/Carbon.h>
+
+    static void* rmtOpenBundleGLMacOS(void)
+    {
+        CFURLRef bundleURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault,
+            CFSTR("/System/Library/Frameworks/OpenGL.framework"), kCFURLPOSIXPathStyle, true);
+
+        CFBundleRef bundle = CFBundleCreate(kCFAllocatorDefault, bundleURL);
+
+        CFRelease(bundleURL);
+        return bundle;
+    }
+
+    static void rmtCloseBundleGLMacOS(void* handle)
+    {
+        CFRelease(handle);
+    }
+
+    static void* rmtglGetProcAddressMacOS(const void* handle, const char *proc)
+    {
+        CFStringRef procName = CFStringCreateWithCString(
+            kCFAllocatorDefault, proc, kCFStringEncodingASCII);
+
+        void* procAddress = CFBundleGetFunctionPointerForName(handle, procName);
+
+        CFRelease(procName);
+        return procAddress;
+    }
+#endif
 
 static void* rmtglGetProcAddress(OpenGL* opengl, const char* symbol)
 {
@@ -5506,7 +5536,7 @@ static void* rmtglGetProcAddress(OpenGL* opengl, const char* symbol)
 
     #elif defined(__APPLE__) && !defined(GLEW_APPLE_GLX)
 
-        return NSGLGetProcAddress((const GLubyte*)symbol);
+        return rmtglGetProcAddressMacOS(opengl->dll_handle, symbol);
 
     #elif defined(RMT_PLATFORM_LINUX)
 
@@ -5718,6 +5748,10 @@ RMT_API void _rmt_BindOpenGL()
             opengl->dll_handle = rmtLoadLibrary("opengl32.dll");
         #endif
 
+        #if defined (RMT_PLATFORM_MACOS)
+            opengl->dll_handle = rmtOpenBundleGLMacOS();
+        #endif
+
         opengl->__glGetError = (PFNGLGETERRORPROC)rmtGetProcAddress(opengl->dll_handle, "glGetError");
         opengl->__glGenQueries = (PFNGLGENQUERIESPROC)rmtglGetProcAddress(opengl, "glGenQueries");
         opengl->__glDeleteQueries = (PFNGLDELETEQUERIESPROC)rmtglGetProcAddress(opengl, "glDeleteQueries");
@@ -5781,7 +5815,11 @@ RMT_API void _rmt_UnbindOpenGL(void)
         // Release reference to the OpenGL DLL
         if (opengl->dll_handle != NULL)
         {
-            rmtFreeLibrary(opengl->dll_handle);
+            #if defined(RMT_PLATFORM_MACOS)
+                rmtCloseBundleGLMacOS(opengl->dll_handle);
+            #else
+                rmtFreeLibrary(opengl->dll_handle);
+            #endif
             opengl->dll_handle = NULL;
         }
     }
